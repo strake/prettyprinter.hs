@@ -82,6 +82,7 @@ module Data.Text.Prettyprint.Doc.Internal (
 
 
 import           Control.Applicative
+import           Data.Foldable       (Foldable (..))
 import           Data.Int
 import           Data.List.NonEmpty  (NonEmpty (..))
 import           Data.Maybe
@@ -200,7 +201,7 @@ data Doc ann =
 -- helloworld
 instance Semigroup (Doc ann) where
     (<>) = Cat
-    sconcat (x :| xs) = hcat (x:xs)
+    sconcat = hcat . toList
 
 -- |
 -- @
@@ -222,6 +223,7 @@ instance Monoid (Doc ann) where
 -- 'line' conversion.
 instance IsString (Doc ann) where
     fromString = pretty . T.pack
+    {-# INLINE fromString #-}
 
 -- | Alter the document’s annotations.
 --
@@ -315,6 +317,7 @@ instance Pretty Bool where
 instance Pretty Char where
     pretty '\n' = line
     pretty c = Char c
+    {-# INLINE pretty #-}
 
     prettyList = pretty . (id :: Text -> Text) . fromString
 
@@ -323,11 +326,13 @@ instance Pretty Char where
 -- 'unsafeViaShow'.
 viaShow :: Show a => a -> Doc ann
 viaShow = pretty . T.pack . show
+{-# INLINE viaShow #-}
 
 -- | Convenience function to convert a 'Show'able value /that must not contain
 -- newlines/ to a 'Doc'. If there may be newlines, use 'viaShow' instead.
 unsafeViaShow :: Show a => a -> Doc ann
 unsafeViaShow = unsafeTextWithoutNewlines . T.pack . show
+{-# INLINE unsafeViaShow #-}
 
 -- | >>> pretty (123 :: Int)
 -- 123
@@ -424,7 +429,9 @@ instance Pretty a => Pretty (Maybe a) where
 -- hello world
 --
 -- Manually use @'hardline'@ if you /definitely/ want newlines.
-instance Pretty Text where pretty = vsep . map unsafeTextWithoutNewlines . T.splitOn "\n"
+instance Pretty Text where
+    pretty = vsep . map unsafeTextWithoutNewlines . T.splitOn "\n"
+    {-# INLINE pretty #-}
 
 -- | (lazy 'Text' instance, identical to the strict version)
 instance Pretty Lazy.Text where pretty = pretty . Lazy.toStrict
@@ -448,6 +455,7 @@ unsafeTextWithoutNewlines text = case T.uncons text of
     Just (t,ext)
         | T.null ext -> Char t
         | otherwise -> Text (T.length text) text
+{-# INLINE unsafeTextWithoutNewlines #-}
 
 -- | The empty document behaves like @('pretty' "")@, so it has a height of 1.
 -- This may lead to surprising behaviour if we expect it to bear no weight
@@ -486,6 +494,7 @@ nest
     -> Doc ann
 nest 0 x = x -- Optimization
 nest i x = Nest i x
+{-# INLINE nest #-}
 
 -- | The @'line'@ document advances to the next line and indents to the current
 -- nesting level.
@@ -763,6 +772,7 @@ flatAlt = FlatAlt
 --       dolor
 align :: Doc ann -> Doc ann
 align d = column (\k -> nesting (\i -> nest (k - i) d)) -- nesting might be negative!
+{-# INLINE align #-}
 
 -- | @('hang' i x)@ lays out the document @x@ with a nesting level set to the
 -- /current column/ plus @i@. Negative values are allowed, and decrease the
@@ -791,6 +801,7 @@ hang
     -> Doc ann
     -> Doc ann
 hang i d = align (nest i d)
+{-# INLINE hang #-}
 
 -- | @('indent' i x)@ indents document @x@ with @i@ spaces, starting from the
 -- current cursor position.
@@ -810,6 +821,7 @@ indent
     -> Doc ann
     -> Doc ann
 indent i d = hang i (spaces i <> d)
+{-# INLINE indent #-}
 
 -- | @('encloseSep' l r sep xs)@ concatenates the documents @xs@ separated by
 -- @sep@, and encloses the resulting document by @l@ and @r@.
@@ -895,7 +907,7 @@ tupled = group . encloseSep (flatAlt "( " "(")
 (<+>) :: Doc ann -> Doc ann -> Doc ann
 x <+> y = x <> Char ' ' <> y
 infixr 6 <+> -- like <>
-
+{-# INLINE (<+>) #-}
 
 
 -- | Concatenate all documents element-wise with a binary function.
@@ -945,6 +957,7 @@ concatWith f ds
 -- For automatic line breaks, consider using 'fillSep' instead.
 hsep :: [Doc ann] -> Doc ann
 hsep = concatWith (<+>)
+{-# INLINE hsep #-}
 
 -- | @('vsep' xs)@ concatenates all documents @xs@ above each other. If a
 -- 'group' undoes the line breaks inserted by @vsep@, the documents are
@@ -975,6 +988,7 @@ hsep = concatWith (<+>)
 -- that.
 vsep :: [Doc ann] -> Doc ann
 vsep = concatWith (\x y -> x <> line <> y)
+{-# INLINE vsep #-}
 
 -- | @('fillSep' xs)@ concatenates the documents @xs@ horizontally with @'<+>'@
 -- as long as it fits the page, then inserts a @'line'@ and continues doing that
@@ -997,6 +1011,7 @@ vsep = concatWith (\x y -> x <> line <> y)
 -- sit amet lorem ipsum dolor sit amet
 fillSep :: [Doc ann] -> Doc ann
 fillSep = concatWith (\x y -> x <> softline <> y)
+{-# INLINE fillSep #-}
 
 -- | @('sep' xs)@ tries laying out the documents @xs@ separated with 'space's,
 -- and if this does not fit the page, separates them with newlines. This is what
@@ -1020,7 +1035,7 @@ fillSep = concatWith (\x y -> x <> softline <> y)
 -- @
 sep :: [Doc ann] -> Doc ann
 sep = group . vsep
-
+{-# INLINE sep #-}
 
 
 -- | @('hcat' xs)@ concatenates all documents @xs@ horizontally with @'<>'@
@@ -1033,6 +1048,7 @@ sep = group . vsep
 -- loremipsumdolor
 hcat :: [Doc ann] -> Doc ann
 hcat = concatWith (<>)
+{-# INLINE hcat #-}
 
 -- | @('vcat' xs)@ vertically concatenates the documents @xs@. If it is
 -- 'group'ed, the line breaks are removed.
@@ -1052,6 +1068,7 @@ hcat = concatWith (<>)
 -- it.
 vcat :: [Doc ann] -> Doc ann
 vcat = concatWith (\x y -> x <> line' <> y)
+{-# INLINE vcat #-}
 
 -- | @('fillCat' xs)@ concatenates documents @xs@ horizontally with @'<>'@ as
 -- long as it fits the page, then inserts a @'line''@ and continues doing that
@@ -1081,6 +1098,7 @@ vcat = concatWith (\x y -> x <> line' <> y)
 -- loremipsumdolorsitamet
 fillCat :: [Doc ann] -> Doc ann
 fillCat = concatWith (\x y -> x <> softline' <> y)
+{-# INLINE fillCat #-}
 
 -- | @('cat' xs)@ tries laying out the documents @xs@ separated with nothing,
 -- and if this does not fit the page, separates them with newlines. This is what
@@ -1103,7 +1121,7 @@ fillCat = concatWith (\x y -> x <> softline' <> y)
 -- @
 cat :: [Doc ann] -> Doc ann
 cat = group . vcat
-
+{-# INLINE cat #-}
 
 
 -- | @('punctuate' p xs)@ appends @p@ to all but the last document in @xs@.
@@ -1527,12 +1545,12 @@ fuse depth = go
 data SimpleDocStream ann =
       SFail
     | SEmpty
-    | SChar Char (SimpleDocStream ann)
+    | SChar !Char (SimpleDocStream ann)
 
     -- | Some layout algorithms use the Since the frequently used 'T.length' of
     -- the 'Text', which scales linearly with its length, we cache it in this
     -- constructor.
-    | SText !Int Text (SimpleDocStream ann)
+    | SText !Int !Text (SimpleDocStream ann)
 
     -- | @Int@ = indentation level for the (next) line
     | SLine !Int (SimpleDocStream ann)
@@ -1661,7 +1679,7 @@ data LayoutPipeline ann =
 -- (e.g. via 'softline'').
 data PageWidth
 
-    = AvailablePerLine Int Double
+    = AvailablePerLine !Int !Double
     -- ^ Layouters should not exceed the specified space per line.
     --
     --   - The 'Int' is the number of characters, including whitespace, that
@@ -1690,6 +1708,7 @@ remainingWidth lineLength ribbonFraction lineIndent currentColumn =
     ribbonWidth =
         (max 0 . min lineLength . round)
             (fromIntegral lineLength * ribbonFraction)
+{-# INLINE remainingWidth #-}
 
 -- $ Test to avoid surprising behaviour
 -- >>> Unbounded > AvailablePerLine maxBound 1
@@ -2092,6 +2111,7 @@ layoutCompact = scan 0 . pure
 -- ignoring all annotations.
 instance Show (Doc ann) where
     showsPrec _ = renderShowS . layoutPretty defaultLayoutOptions
+    {-# INLINE showsPrec #-}
 
 -- | Render a 'SimpleDocStream' to a 'ShowS', useful to write 'Show' instances
 -- based on the prettyprinter.
@@ -2123,6 +2143,7 @@ renderShowS = \case
 -- (See <https://github.com/quchen/prettyprinter/issues/131>.)
 textSpaces :: Int -> Text
 textSpaces n = T.replicate n (T.singleton ' ')
+{-# INLINE textSpaces #-}
 
 
 -- $setup
