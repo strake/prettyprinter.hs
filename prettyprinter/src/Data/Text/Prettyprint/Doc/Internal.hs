@@ -1,7 +1,6 @@
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE DefaultSignatures   #-}
-{-# LANGUAGE DeriveDataTypeable  #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -90,7 +89,6 @@ import           Data.String         (IsString (..))
 import           Data.Text           (Text)
 import qualified Data.Text           as T
 import qualified Data.Text.Lazy      as Lazy
-import           Data.Typeable       (Typeable)
 import           Data.Void
 import           Data.Word
 import           GHC.Generics        (Generic)
@@ -191,7 +189,7 @@ data Doc ann =
     -- | Add an annotation to the enclosed 'Doc'. Can be used for example to add
     -- styling directives or alt texts that can then be used by the renderer.
     | Annotated ann (Doc ann)
-    deriving (Generic, Typeable)
+    deriving (Generic)
 
 -- |
 -- @
@@ -214,7 +212,6 @@ instance Semigroup (Doc ann) where
 -- helloworld
 instance Monoid (Doc ann) where
     mempty = emptyDoc
-    mappend = (<>)
     mconcat = hcat
 
 -- | >>> pretty ("hello\nworld")
@@ -290,7 +287,7 @@ instance Pretty a => Pretty [a] where
     pretty = prettyList
 
 instance Pretty a => Pretty (NonEmpty a) where
-    pretty (x:|xs) = prettyList (x:xs)
+    pretty = prettyList . toList
 
 -- | >>> pretty ()
 -- ()
@@ -615,11 +612,7 @@ data FlattenResult a
     -- ^ The input was already flat, e.g. a 'Text'.
     | NeverFlat
     -- ^ The input couldn't be flattened: It contained a 'Line' or 'Fail'.
-
-instance Functor FlattenResult where
-    fmap f (Flattened a) = Flattened (f a)
-    fmap _ AlreadyFlat   = AlreadyFlat
-    fmap _ NeverFlat     = NeverFlat
+  deriving (Functor)
 
 -- | Choose the first element of each @Union@, and discard the first field of
 -- all @FlatAlt@s.
@@ -631,7 +624,7 @@ instance Functor FlattenResult where
 -- contains a hard 'Line' or 'Fail'.
 -- See [Group: special flattening] for further explanations.
 changesUponFlattening :: Doc ann -> FlattenResult (Doc ann)
-changesUponFlattening = \doc -> case doc of
+changesUponFlattening = \case
     FlatAlt _ y     -> Flattened (flatten y)
     Line            -> NeverFlat
     Union x _       -> Flattened x
@@ -657,7 +650,7 @@ changesUponFlattening = \doc -> case doc of
   where
     -- Flatten, but don’t report whether anything changes.
     flatten :: Doc ann -> Doc ann
-    flatten = \doc -> case doc of
+    flatten = \case
         FlatAlt _ y     -> flatten y
         Cat x y         -> Cat (flatten x) (flatten y)
         Nest i x        -> Nest i (flatten x)
@@ -847,10 +840,10 @@ encloseSep
     -> Doc ann   -- ^ separator
     -> [Doc ann] -- ^ input documents
     -> Doc ann
-encloseSep l r s ds = case ds of
+encloseSep l r s = \case
     []  -> l <> r
     [d] -> l <> d <> r
-    _   -> cat (zipWith (<>) (l : repeat s) ds) <> r
+    ds  -> cat (zipWith (<>) (l : repeat s) ds) <> r
 
 -- | Haskell-inspired variant of 'encloseSep' with braces and comma as
 -- separator.
@@ -1371,7 +1364,7 @@ reAnnotate re = alterAnnotations (pure . re)
 alterAnnotations :: (ann -> [ann']) -> Doc ann -> Doc ann'
 alterAnnotations re = go
   where
-    go = \doc -> case doc of
+    go = \case
         Fail     -> Fail
         Empty    -> Empty
         Char c   -> Char c
@@ -1395,32 +1388,13 @@ alterAnnotations re = go
 
 -- | Remove all annotations. 'unAnnotate' for 'SimpleDocStream'.
 unAnnotateS :: SimpleDocStream ann -> SimpleDocStream xxx
-unAnnotateS = go
-  where
-    go = \doc -> case doc of
-        SFail              -> SFail
-        SEmpty             -> SEmpty
-        SChar c rest       -> SChar c (go rest)
-        SText l t rest     -> SText l t (go rest)
-        SLine l rest       -> SLine l (go rest)
-        SAnnPop rest       -> go rest
-        SAnnPush _ann rest -> go rest
+unAnnotateS = alterAnnotationsS (pure Nothing)
 
 -- | Change the annotation of a document. 'reAnnotate' for 'SimpleDocStream'.
 reAnnotateS :: (ann -> ann') -> SimpleDocStream ann -> SimpleDocStream ann'
-reAnnotateS re = go
-  where
-    go = \doc -> case doc of
-        SFail             -> SFail
-        SEmpty            -> SEmpty
-        SChar c rest      -> SChar c (go rest)
-        SText l t rest    -> SText l t (go rest)
-        SLine l rest      -> SLine l (go rest)
-        SAnnPop rest      -> SAnnPop (go rest)
-        SAnnPush ann rest -> SAnnPush (re ann) (go rest)
+reAnnotateS = fmap
 
 data AnnotationRemoval = Remove | DontRemove
-  deriving Typeable
 
 -- | Change the annotation of a document to a different annotation, or none at
 -- all. 'alterAnnotations' for 'SimpleDocStream'.
@@ -1434,7 +1408,7 @@ alterAnnotationsS re = go []
   where
     -- We keep a stack of whether to remove a pop so that we can remove exactly
     -- the pops corresponding to annotations that mapped to Nothing.
-    go stack = \sds -> case sds of
+    go stack = \case
         SFail             -> SFail
         SEmpty            -> SEmpty
         SChar c rest      -> SChar c (go stack rest)
@@ -1465,7 +1439,7 @@ data FusionDepth =
     -- This value should only be used if profiling shows it is significantly
     -- faster than using 'Shallow'.
     | Deep
-    deriving (Eq, Ord, Show, Typeable)
+    deriving (Eq, Ord, Show)
 
 -- | @('fuse' depth doc)@ combines text nodes so they can be rendered more
 -- efficiently. A fused document is always laid out identical to its unfused
@@ -1497,7 +1471,7 @@ data FusionDepth =
 fuse :: FusionDepth -> Doc ann -> Doc ann
 fuse depth = go
   where
-    go = \doc -> case doc of
+    go = \case
         Cat Empty x                   -> go x
         Cat x Empty                   -> go x
         Cat (Char c1) (Char c2)       -> Text 2 (T.singleton c1 <> T.singleton c2)
@@ -1568,7 +1542,7 @@ data SimpleDocStream ann =
 
     -- | Remove a previously pushed annotation.
     | SAnnPop (SimpleDocStream ann)
-    deriving (Eq, Ord, Show, Generic, Typeable)
+    deriving (Eq, Ord, Show, Generic, Foldable, Functor, Traversable)
 
 -- | Remove all trailing space characters.
 --
@@ -1601,7 +1575,7 @@ removeTrailingWhitespace = go (RecordedWhitespace [] 0)
     go :: WhitespaceStrippingState -> SimpleDocStream ann -> SimpleDocStream ann
     -- We do not strip whitespace inside annotated documents, since it might
     -- actually be relevant there.
-    go annLevel@(AnnotationLevel annLvl) = \sds -> case sds of
+    go annLevel@(AnnotationLevel annLvl) = \case
         SFail             -> SFail
         SEmpty            -> SEmpty
         SChar c rest      -> SChar c (go annLevel rest)
@@ -1615,7 +1589,7 @@ removeTrailingWhitespace = go (RecordedWhitespace [] 0)
             | otherwise   -> SAnnPop (go (RecordedWhitespace [] 0) rest)
     -- Record all spaces/lines encountered, and once proper text starts again,
     -- release only the necessary ones.
-    go (RecordedWhitespace withheldLines withheldSpaces) = \sds -> case sds of
+    go (RecordedWhitespace withheldLines withheldSpaces) = \case
         SFail -> SFail
         SEmpty -> prependEmptyLines withheldLines SEmpty
         SChar c rest
@@ -1648,7 +1622,6 @@ data WhitespaceStrippingState
     = AnnotationLevel !Int
     | RecordedWhitespace [Int] !Int
       -- ^ [Newline with indentation i] Spaces
-  deriving Typeable
 
 
 
@@ -1663,42 +1636,6 @@ data WhitespaceStrippingState
 
 
 
--- | Alter the document’s annotations.
---
--- This instance makes 'SimpleDocStream' more flexible (because it can be used in
--- 'Functor'-polymorphic values), but @'fmap'@ is much less readable compared to
--- using @'reAnnotateST'@ in code that only works for @'SimpleDocStream'@ anyway.
--- Consider using the latter when the type does not matter.
-instance Functor SimpleDocStream where
-    fmap = reAnnotateS
-
--- | Collect all annotations from a document.
-instance Foldable SimpleDocStream where
-    foldMap f = go
-      where
-        go = \sds -> case sds of
-            SFail             -> mempty
-            SEmpty            -> mempty
-            SChar _ rest      -> go rest
-            SText _ _ rest    -> go rest
-            SLine _ rest      -> go rest
-            SAnnPush ann rest -> f ann `mappend` go rest
-            SAnnPop rest      -> go rest
-
--- | Transform a document based on its annotations, possibly leveraging
--- 'Applicative' effects.
-instance Traversable SimpleDocStream where
-    traverse f = go
-      where
-        go = \sds -> case sds of
-            SFail             -> pure SFail
-            SEmpty            -> pure SEmpty
-            SChar c rest      -> SChar c   <$> go rest
-            SText l t rest    -> SText l t <$> go rest
-            SLine i rest      -> SLine i   <$> go rest
-            SAnnPush ann rest -> SAnnPush  <$> f ann <*> go rest
-            SAnnPop rest      -> SAnnPop   <$> go rest
-
 -- | Decide whether a 'SimpleDocStream' fits the constraints given, namely
 --
 --   - original indentation of the current line
@@ -1712,14 +1649,12 @@ newtype FittingPredicate ann
                    -> Maybe Int
                    -> SimpleDocStream ann
                    -> Bool)
-  deriving Typeable
 
 -- | List of nesting level/document pairs yet to be laid out.
 data LayoutPipeline ann =
       Nil
     | Cons !Int (Doc ann) (LayoutPipeline ann)
     | UndoAnn (LayoutPipeline ann)
-  deriving Typeable
 
 -- | Maximum number of characters that fit in one line. The layout algorithms
 -- will try not to exceed the set limit by inserting line breaks when applicable
@@ -1740,7 +1675,7 @@ data PageWidth
     | Unbounded
     -- ^ Layouters should not introduce line breaks on their own.
 
-    deriving (Eq, Ord, Show, Typeable)
+    deriving (Eq, Ord, Show)
 
 defaultPageWidth :: PageWidth
 defaultPageWidth = AvailablePerLine 80 1
@@ -1762,7 +1697,7 @@ remainingWidth lineLength ribbonFraction lineIndent currentColumn =
 
 -- | Options to influence the layout algorithms.
 newtype LayoutOptions = LayoutOptions { layoutPageWidth :: PageWidth }
-    deriving (Eq, Ord, Show, Typeable)
+    deriving (Eq, Ord, Show)
 
 -- | The default layout options, suitable when you just want some output, and
 -- don’t particularly care about the details. Used by the 'Show' instance, for
@@ -1929,7 +1864,7 @@ layoutUnbounded =
     failsOnFirstLine :: SimpleDocStream ann -> Bool
     failsOnFirstLine = go
       where
-        go sds = case sds of
+        go = \case
             SFail        -> True
             SEmpty       -> False
             SChar _ s    -> go s
@@ -1995,7 +1930,7 @@ layoutWadlerLeijen
         | otherwise = y
 
     initialIndentation :: SimpleDocStream ann -> Maybe Int
-    initialIndentation sds = case sds of
+    initialIndentation = \case
         SLine i _    -> Just i
         SAnnPush _ s -> initialIndentation s
         SAnnPop s    -> initialIndentation s
@@ -2135,7 +2070,7 @@ detected and rejected in a previous iteration.
 -- dolor
 -- sit
 layoutCompact :: Doc ann -> SimpleDocStream ann
-layoutCompact doc = scan 0 [doc]
+layoutCompact = scan 0 . pure
   where
     scan _ [] = SEmpty
     scan !col (d:ds) = case d of
@@ -2156,7 +2091,7 @@ layoutCompact doc = scan 0 [doc]
 -- | @('show' doc)@ prettyprints document @doc@ with 'defaultLayoutOptions',
 -- ignoring all annotations.
 instance Show (Doc ann) where
-    showsPrec _ doc = renderShowS (layoutPretty defaultLayoutOptions doc)
+    showsPrec _ = renderShowS . layoutPretty defaultLayoutOptions
 
 -- | Render a 'SimpleDocStream' to a 'ShowS', useful to write 'Show' instances
 -- based on the prettyprinter.
@@ -2166,7 +2101,7 @@ instance Show (Doc ann) where
 --     'showsPrec' _ = 'renderShowS' . 'layoutPretty' 'defaultLayoutOptions' . 'pretty'
 -- @
 renderShowS :: SimpleDocStream ann -> ShowS
-renderShowS = \sds -> case sds of
+renderShowS = \case
     SFail        -> panicUncaughtFail
     SEmpty       -> id
     SChar c x    -> showChar c . renderShowS x
