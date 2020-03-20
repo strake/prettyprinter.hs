@@ -10,8 +10,9 @@ import Prelude.Compat
 
 import           Control.DeepSeq
 import           Control.Monad.Compat
-import           Gauge
+import           Weigh hiding (Case)
 import           Data.Char
+import           Data.Foldable
 import           Data.Map                              (Map)
 import qualified Data.Map                              as M
 import           Data.Text                             (Text)
@@ -191,19 +192,22 @@ main = do
 
     rnf prog `seq` T.putStrLn "Starting benchmark…"
 
-    defaultMain
-        [ bgroup "80 characters, 50% ribbon"
-            [ bgroup "prettyprinter"
-                [ bench "layoutPretty"  (nf (renderWith (layoutPretty _80ColumnsLayoutOptions)) prog)
-                , bench "layoutSmart"   (nf (renderWith (layoutSmart  _80ColumnsLayoutOptions)) prog)
-                , bench "layoutCompact" (nf (renderWith layoutCompact                         ) prog)
+    (mainWith . sequenceA_)
+        [ wgroup' "80 characters, 50% ribbon"
+            [ wgroup' "prettyprinter"
+                [ func "layoutPretty"  (renderWith (layoutPretty _80ColumnsLayoutOptions)) prog
+                , func "layoutSmart"   (renderWith (layoutSmart  _80ColumnsLayoutOptions)) prog
+                , func "layoutCompact" (renderWith layoutCompact                         ) prog
                 ]
-            , bench "ansi-wl-pprint" (nf (($ "") . WL.displayS . WL.renderPretty 0.5 80 . WL.pretty) prog) ]
-        , bgroup "Infinite/large page width"
-            [ bgroup "prettyprinter"
-                [ bench "layoutPretty"  (nf (renderWith (layoutPretty unboundedLayoutOptions)) prog)
-                , bench "layoutSmart"   (nf (renderWith (layoutSmart  unboundedLayoutOptions)) prog)
-                , bench "layoutCompact" (nf (renderWith layoutCompact                        ) prog)
+            , func "ansi-wl-pprint" (($ "") . WL.displayS . WL.renderPretty 0.5 80 . WL.pretty) prog ]
+        , wgroup' "Infinite/large page width"
+            [ wgroup' "prettyprinter"
+                [ func "layoutPretty"  (renderWith (layoutPretty unboundedLayoutOptions)) prog
+                , func "layoutSmart"   (renderWith (layoutSmart  unboundedLayoutOptions)) prog
+                , func "layoutCompact" (renderWith layoutCompact                        ) prog
                 ]
-            , bench "ansi-wl-pprint" (nf (($ "") . WL.displayS . WL.renderPretty 1 (fromIntegral progWidth + 10) . WL.pretty) prog) ]
+            , func "ansi-wl-pprint" (($ "") . WL.displayS . WL.renderPretty 1 (fromIntegral progWidth + 10) . WL.pretty) prog ]
         ]
+
+wgroup' :: String -> [Weigh ()] -> Weigh ()
+wgroup' x = wgroup x . sequenceA_

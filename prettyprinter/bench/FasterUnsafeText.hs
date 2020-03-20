@@ -1,11 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE UnicodeSyntax #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
 
 
 
-import           Gauge.Main
+import           Weigh
+import           Control.DeepSeq
 import           Data.Char
+import           Data.Coerce
+import           Data.Foldable
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Prettyprint.Doc.Internal
@@ -24,12 +29,22 @@ current :: Text -> Doc ann
 current = unsafeTextWithoutNewlines
 
 main :: IO ()
-main = defaultMain [ benchText (letters n) | n <- [0,1,2,3,5,10,50,100] ]
+main = (mainWith . sequenceA_) [ weighText (letters n) | n <- [0,1,2,3,5,10,50,100] ]
 
 letters :: Int -> Text
 letters n = T.pack (take n (filter isAlpha [minBound ..]))
 
-benchText :: Text -> Benchmark
-benchText input = bgroup (show (pretty (T.length input) <+> plural "letter" "letters" (T.length input)))
-    [ bench "alternative" (whnf alternative input)
-    , bench "current" (whnf current input) ]
+weighText :: Text -> Weigh ()
+weighText input = wgroup' (show (pretty (T.length input) <+> plural "letter" "letters" (T.length input)))
+    [ wfunc "alternative" alternative input
+    , wfunc "current" current input ]
+
+wgroup' :: String -> [Weigh ()] -> Weigh ()
+wgroup' x = wgroup x . sequenceA_
+
+newtype Whnf a = Whnf { unWhnf :: a }
+
+instance NFData (Whnf a) where rnf = flip seq ()
+
+wfunc :: ∀ a b . String -> (b -> a) -> b -> Weigh ()
+wfunc s f = func s (coerce f :: Whnf b -> Whnf a) . Whnf

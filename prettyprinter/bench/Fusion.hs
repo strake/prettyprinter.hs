@@ -7,12 +7,14 @@ module Main (main) where
 
 
 
+import           Control.DeepSeq
 import           Control.Monad
 import           Control.Monad.State
-import           Gauge.Main
+import           Data.Foldable
 import           Data.Text           (Text)
 import qualified Data.Text           as T
 import           System.Random
+import           Weigh
 
 import           Data.Text.Prettyprint.Doc
 import           Data.Text.Prettyprint.Doc.Render.Text
@@ -25,24 +27,24 @@ import Control.Applicative
 
 
 main :: IO ()
-main = defaultMain
+main = (mainWith . sequenceA_)
     [ benchOptimize
     , benchWLComparison
     ]
 
-benchOptimize :: Benchmark
-benchOptimize = env randomShortWords benchmark_
+benchOptimize :: Weigh ()
+benchOptimize = benchmark_ $!! randomShortWords
   where
     benchmark_ = \shortWords ->
         let doc = hsep (map pretty shortWords)
-        in bgroup "Many small words"
-            [ bench "Unoptimized"     (nf renderLazy (layoutPretty defaultLayoutOptions               doc))
-            , bench "Shallowly fused" (nf renderLazy (layoutPretty defaultLayoutOptions (fuse Shallow doc)))
-            , bench "Deeply fused"    (nf renderLazy (layoutPretty defaultLayoutOptions (fuse Deep    doc)))
+        in wgroup' "Many small words"
+            [ func "Unoptimized"     renderLazy (layoutPretty defaultLayoutOptions               doc)
+            , func "Shallowly fused" renderLazy (layoutPretty defaultLayoutOptions (fuse Shallow doc))
+            , func "Deeply fused"    renderLazy (layoutPretty defaultLayoutOptions (fuse Deep    doc))
             ]
 
-    randomShortWords :: Applicative m => m [Text]
-    randomShortWords = pure (evalState (randomShortWords' 100) (mkStdGen 0))
+    randomShortWords :: [Text]
+    randomShortWords = evalState (randomShortWords' 100) (mkStdGen 0)
 
     randomShortWords' :: Int -> State StdGen [Text]
     randomShortWords' n = replicateM n randomShortWord
@@ -56,25 +58,25 @@ benchOptimize = env randomShortWords benchmark_
         put gNew
         pure (T.pack xs)
 
-benchWLComparison :: Benchmark
-benchWLComparison = bgroup "vs. other libs"
-    [ bgroup "renderPretty"
-        [ bench "this, unoptimized"     (nf (renderLazy . layoutPretty defaultLayoutOptions)               doc)
-        , bench "this, shallowly fused" (nf (renderLazy . layoutPretty defaultLayoutOptions) (fuse Shallow doc))
-        , bench "this, deeply fused"    (nf (renderLazy . layoutPretty defaultLayoutOptions) (fuse Deep    doc))
-        , bench "ansi-wl-pprint"        (nf (\d -> WL.displayS (WL.renderPretty 0.4 80 d) "") wlDoc)
+benchWLComparison :: Weigh ()
+benchWLComparison = wgroup' "vs. other libs"
+    [ wgroup' "renderPretty"
+        [ func "this, unoptimized"     (renderLazy . layoutPretty defaultLayoutOptions)               doc
+        , func "this, shallowly fused" (renderLazy . layoutPretty defaultLayoutOptions) (fuse Shallow doc)
+        , func "this, deeply fused"    (renderLazy . layoutPretty defaultLayoutOptions) (fuse Deep    doc)
+        , func "ansi-wl-pprint"        (\d -> WL.displayS (WL.renderPretty 0.4 80 d) "") wlDoc
         ]
-    , bgroup "renderSmart"
-        [ bench "this, unoptimized"     (nf (renderLazy . layoutSmart defaultLayoutOptions)               doc)
-        , bench "this, shallowly fused" (nf (renderLazy . layoutSmart defaultLayoutOptions) (fuse Shallow doc))
-        , bench "this, deeply fused"    (nf (renderLazy . layoutSmart defaultLayoutOptions) (fuse Deep    doc))
-        , bench "ansi-wl-pprint"        (nf (\d -> WL.displayS (WL.renderSmart 0.4 80 d) "") wlDoc)
+    , wgroup' "renderSmart"
+        [ func "this, unoptimized"     (renderLazy . layoutSmart defaultLayoutOptions)               doc
+        , func "this, shallowly fused" (renderLazy . layoutSmart defaultLayoutOptions) (fuse Shallow doc)
+        , func "this, deeply fused"    (renderLazy . layoutSmart defaultLayoutOptions) (fuse Deep    doc)
+        , func "ansi-wl-pprint"        (\d -> WL.displayS (WL.renderSmart 0.4 80 d) "") wlDoc
         ]
-    , bgroup "renderCompact"
-        [ bench "this, unoptimized"     (nf (renderLazy . layoutCompact)               doc)
-        , bench "this, shallowly fused" (nf (renderLazy . layoutCompact) (fuse Shallow doc))
-        , bench "this, deeply fused"    (nf (renderLazy . layoutCompact) (fuse Deep    doc))
-        , bench "ansi-wl-pprint"        (nf (\d -> WL.displayS (WL.renderCompact d) "") wlDoc)
+    , wgroup' "renderCompact"
+        [ func "this, unoptimized"     (renderLazy . layoutCompact)               doc
+        , func "this, shallowly fused" (renderLazy . layoutCompact) (fuse Shallow doc)
+        , func "this, deeply fused"    (renderLazy . layoutCompact) (fuse Deep    doc)
+        , func "ansi-wl-pprint"        (\d -> WL.displayS (WL.renderCompact d) "") wlDoc
         ]
     ]
   where
@@ -89,3 +91,6 @@ benchWLComparison = bgroup "vs. other libs"
             in funnn (WL.sep (take 48 (cycle ["hello", "world"])))
 
     chain n f = foldr (.) id (replicate n f)
+
+wgroup' :: String -> [Weigh ()] -> Weigh ()
+wgroup' x = wgroup x . sequenceA_
