@@ -83,6 +83,7 @@ module Data.Text.Prettyprint.Doc.Internal (
 
 import           Control.Applicative
 import           Data.Foldable       (Foldable (..))
+import           Data.Function       (on)
 import           Data.Int
 import           Data.List.NonEmpty  (NonEmpty (..))
 import           Data.Maybe
@@ -191,6 +192,9 @@ data Doc ann =
     -- styling directives or alt texts that can then be used by the renderer.
     | Annotated ann (Doc ann)
     deriving (Generic)
+
+instance Eq ann => Eq (Doc ann) where
+    (==) = on (==) layoutCompact
 
 -- |
 -- @
